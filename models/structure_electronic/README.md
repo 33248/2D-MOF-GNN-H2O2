@@ -1,39 +1,53 @@
-# 2D-MOF-GNN-H2O2 — Adsorption Energy Target
+# Hierarchical CGCNN for *OOH Adsorption-Energy Prediction
 
-This version regresses an adsorption-energy label rather than overpotential. All Python source messages and CLI help text are in English; original model and training operations have not been changed. It preserves the original two-stage Hierarchical CGCNN architecture: electronic-property prediction (`work_function`, `d_band_center`) and joint adsorption-energy prediction.
+This directory contains the hierarchical crystal graph convolutional neural network (CGCNN) for two-stage electronic-property prediction and *OOH adsorption-energy regression in two-dimensional metal–organic frameworks.
 
-## Data layout
+## Dataset
 
-```
-data/
-├── training_data.csv
-├── atom_init.json
-└── cif_files/
-    ├── example_1.cif
-    └── ...
-```
+Use the repository-level `data/` directory containing `data.csv`, `cif_files/`, `atom_init.json`, `zval_map.json`, and `ionization_energy_map.json`.
 
-Required CSV fields for `--task joint`: `cif_filename`, `adsorption_energy`, `work_function`, `d_band_center` (use actual filenames; the electronic fields are used by the joint electronic-property losses). The target column also accepts `adsorption_free_energy`, `ΔG*OOH`, `ΔG_OOH`, or `dG_OOH`. The target value is used directly, without transformation; only provide actual adsorption-energy or adsorption-free-energy labels in eV, according to your experiment's definition.
+The recommended CSV columns are `cif_filename`, `adsorption_energy`, `work_function`, and `d_band_center`. The `adsorption_energy` target is the DFT-calculated *OOH adsorption energy in eV. The electronic-property targets are work function and d-band center, also in eV.
 
-## Commands
+## Run from the repository root
 
-```
-python train.py data --task electronic --reprocess --save-dir ckpt_electronic
-python train.py data --task joint --reprocess --init-electronic-ckpt ckpt_electronic/best_model.pt --save-dir ckpt_adsorption
+**Stage 1 — electronic-property prediction**
+
+```bash
+python models/structure_electronic/train.py data \
+  --task electronic \
+  --epochs 300 --patience 30 --seed 42 --reprocess \
+  --save-dir checkpoints/electronic_stage1
 ```
 
-Early stopping patience defaults to **30 epochs** without improvement in validation loss (`--patience 30`). The learning-rate scheduler retains its original, separate patience of 10 epochs.
+**Stage 2 — joint adsorption-energy prediction**
 
-Coordination-number (`CN`) node features are enabled by default; no `--use-cn` argument is needed. The current model uses coordination-number statistics in its global feature extractor, so this package keeps CN enabled. Use `--reprocess` to rebuild old graph caches.
+```bash
+python models/structure_electronic/train.py data \
+  --task joint \
+  --init-electronic-ckpt checkpoints/electronic_stage1/best_model.pt \
+  --epochs 300 --patience 30 --seed 42 --reprocess \
+  --save-dir checkpoints/structure_electronic
+```
 
-Install required dependencies (PyTorch, PyTorch Geometric, pymatgen, pandas, scikit-learn, matplotlib, numpy) in an appropriate environment before running. The `--reprocess` flag removes stale cached graph objects from older overpotential-labeled versions. Check data and physical quantities prior to training. The repository's original triplet-angle implementation and training pipeline have not been independently verified in a complete training run.
+The joint stage initializes the electronic-property predictor from the Stage 1 checkpoint.
 
-Outputs from joint training use `adsorption_energy`, including prediction CSV columns, evaluation metrics, plots and JSON results.
+## Default settings
 
-## Notes on this edition
+- Maximum epochs: `300`
+- Early-stopping patience: `30`
+- Batch size: `16`
+- Learning rate: `1e-3`
+- Random seed: `42`
+- Cutoff radius: `8` Å
+- Maximum neighbors: `12`
+- Gaussian radial distance features: `64` bins
+- Coordination-number (CN), ZVAL, and ionization-energy node features: enabled by default
+- Intended training/validation/test split: `70/15/15`
 
-- Source: the previously supplied adsorption-energy **structure + electronic properties** HierarchicalCGCNN version with coordination-number features enabled and default early-stopping patience 30.
-- The three Python source files contain no comments or docstrings. All Chinese display text is translated to English. Legacy Chinese CSV aliases remain supported internally by Unicode escape strings so that their values are unchanged at runtime.
-- Stage 1 predicts `work_function` and `d_band_center`. Joint training predicts the adsorption-energy target and electronic properties as defined in the original model.
-- For local data in `training_dataset/1`, replace `data` in the example commands with `training_dataset/1`.
-- Exact training results still depend on data, caches, splits and environment. Full training with the 270 CIF files has not been executed for this edition.
+ZVAL and ionization-energy lookup tables are read from `data/zval_map.json` and `data/ionization_energy_map.json` by default. To disable either auxiliary node feature, use `--no-zval` or `--no-ionization-energy`.
+
+The learning-rate scheduler has a separate patience setting of 10 epochs. Graph features and cached files should be rebuilt with `--reprocess` when changing model feature settings.
+
+## Outputs
+
+Training outputs are stored under `--save-dir` and include the argument configuration (`args.json`), normalization statistics, model checkpoints, prediction tables, training history, evaluation metrics, and plots.

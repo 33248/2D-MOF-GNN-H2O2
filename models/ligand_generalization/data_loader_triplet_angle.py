@@ -369,11 +369,8 @@ class MOFDataPreprocessor:
 
 
         target_value = _safe_float_label(properties, "adsorption_energy")
-        if not np.isfinite(target_value):
-            target_value = _safe_float_label(properties, "overpotential")
         data.y = torch.tensor([target_value], dtype=torch.float)
-        data.adsorption_energy = torch.tensor([_safe_float_label(properties, "adsorption_energy")], dtype=torch.float)
-        data.overpotential = torch.tensor([_safe_float_label(properties, "overpotential")], dtype=torch.float)
+        data.adsorption_energy = torch.tensor([target_value], dtype=torch.float)
 
 
         data.work_function = torch.tensor([_safe_float_label(properties, "work_function")], dtype=torch.float)
@@ -745,7 +742,7 @@ def create_synthetic_dataset(n_samples: int = 100,
 
 
         properties_dict[f"mof_{i}.cif"] = {
-            'overpotential': np.random.uniform(0.1, 1.5),
+            'adsorption_energy': np.random.uniform(0.1, 1.5),
             'work_function': np.random.uniform(4.0, 6.0),
             'd_band_center': np.random.uniform(-3.0, -1.0)
         }
@@ -800,7 +797,7 @@ if __name__ == "__main__":
     print(f"\nFirst sample:")
     print(f"  Number of atoms: {sample.x.shape[0]}")
     print(f"  Number of edges: {sample.edge_index.shape[1]}")
-    print(f"  Overpotential: {sample.y.item():.4f} V")
+    print(f"  Adsorption Energy: {sample.y.item():.4f} eV")
     print(f"  Work function: {sample.work_function.item():.4f} eV")
     print(f"  Number of surface atoms: {sample.surface_mask.sum().item()}")
 

@@ -69,15 +69,15 @@ def compute_norm_stats(
     return out
 
 
-def has_valid_overpotential_label(cif_idx: int, cif_files: List[str], properties_dict: Dict[str, Dict]) -> bool:
+def has_valid_adsorption_energy_label(cif_idx: int, cif_files: List[str], properties_dict: Dict[str, Dict]) -> bool:
 
 
     cif_name = os.path.basename(cif_files[int(cif_idx)])
     props = properties_dict.get(cif_name, {})
-    if "overpotential" not in props:
+    if "adsorption_energy" not in props:
         return False
     try:
-        return bool(np.isfinite(float(props["overpotential"])))
+        return bool(np.isfinite(float(props["adsorption_energy"])))
     except Exception:
         return False
 
@@ -133,7 +133,7 @@ def read_dataset_from_csv(data_folder: Path, task: str) -> Tuple[List[str], Dict
 
 
     target_col = None
-    for cand in ["adsorption_energy", "\u5438\u9644\u80fd", "overpotential", "\u8fc7\u7535\u4f4d"]:
+    for cand in ["adsorption_energy", "\u5438\u9644\u80fd"]:
         if cand in df.columns:
             target_col = cand
             break
@@ -147,7 +147,7 @@ def read_dataset_from_csv(data_folder: Path, task: str) -> Tuple[List[str], Dict
 
     if task == "joint":
         if target_col is None:
-            raise ValueError("--task joint requires a CSV target column: adsorption_energy (or its supported legacy aliases, including overpotential).")
+            raise ValueError("--task joint requires an adsorption-energy target column: adsorption_energy (or the equivalent Chinese adsorption-energy heading).")
 
     cif_files: List[str] = []
     properties_dict: Dict[str, Dict] = {}
@@ -202,9 +202,7 @@ def read_dataset_from_csv(data_folder: Path, task: str) -> Tuple[List[str], Dict
             val = row[target_col]
             if val == val:
                 target_val = float(val)
-                props["overpotential"] = target_val
-                if target_col in ["adsorption_energy", "\u5438\u9644\u80fd"]:
-                    props["adsorption_energy"] = target_val
+                props["adsorption_energy"] = target_val
 
         for k in ELECTRONIC_KEYS:
             if k in df.columns:
@@ -229,7 +227,7 @@ class Trainer:
         learning_rate: float,
         save_dir: str,
         lambda_electronic: float,
-        lambda_overpotential: float,
+        lambda_adsorption_energy: float,
         lambda_constraint: float,
         freeze_electronic_epochs: int = 0,
         norm_stats: Optional[Dict[str, Dict[str, float]]] = None,
@@ -244,18 +242,18 @@ class Trainer:
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
         if task == "electronic":
-            lambda_overpotential = 0.0
+            lambda_adsorption_energy = 0.0
 
         self.norm_stats = norm_stats or {}
         self.criterion = HierarchicalLoss(
             lambda_electronic=lambda_electronic,
-            lambda_overpotential=lambda_overpotential,
+            lambda_adsorption_energy=lambda_adsorption_energy,
             lambda_constraint=lambda_constraint,
             norm_stats=self.norm_stats,
         )
 
         if task == "electronic":
-            for p in self.model.overpotential_predictor.parameters():
+            for p in self.model.adsorption_energy_predictor.parameters():
                 p.requires_grad = False
 
         self.optimizer = Adam([p for p in self.model.parameters() if p.requires_grad], lr=learning_rate)
@@ -273,7 +271,7 @@ class Trainer:
             })
         else:
             self.history.update({
-                "train_ovp_mae": [], "val_ovp_mae": [],
+                "train_ads_mae": [], "val_ads_mae": [],
             })
 
         self.best_val_loss = float("inf")
@@ -305,15 +303,15 @@ class Trainer:
         return loss, metrics, preds_targets
 
     def _step_batch_joint(self, batch) -> Tuple[torch.Tensor, Dict[str, np.ndarray]]:
-        overpotential_pred, electronic_features = self.model(batch, return_electronic=True)
+        adsorption_energy_pred, electronic_features = self.model(batch, return_electronic=True)
         predictions = {
-            "overpotential": overpotential_pred,
+            "adsorption_energy": adsorption_energy_pred,
             "electronic_features": electronic_features,
         }
 
         targets: Dict[str, torch.Tensor] = {}
         if hasattr(batch, "y"):
-            targets["overpotential"] = batch.y
+            targets["adsorption_energy"] = batch.y
         for k in ELECTRONIC_KEYS:
             if hasattr(batch, k):
                 targets[k] = getattr(batch, k)
@@ -321,8 +319,8 @@ class Trainer:
         loss, _ = self.criterion(predictions, targets)
 
         out: Dict[str, np.ndarray] = {
-            "pred_ovp": overpotential_pred.detach().cpu().numpy().reshape(-1),
-            "true_ovp": batch.y.detach().cpu().numpy().reshape(-1),
+            "pred_ads": adsorption_energy_pred.detach().cpu().numpy().reshape(-1),
+            "true_ads": batch.y.detach().cpu().numpy().reshape(-1),
         }
         for k in ELECTRONIC_KEYS:
             if k in electronic_features and hasattr(batch, k):
@@ -360,8 +358,8 @@ class Trainer:
 
             return {"loss": avg_loss, "e_avg_mse": avg_mse, "e_avg_r2": avg_r2, **{f"e_{k}_mse": per_key[k]["mse"] for k in ELECTRONIC_KEYS}, **{f"e_{k}_r2": per_key[k]["r2"] for k in ELECTRONIC_KEYS}}
 
-        all_ovp_true: List[float] = []
-        all_ovp_pred: List[float] = []
+        all_ads_true: List[float] = []
+        all_ads_pred: List[float] = []
         all_true: Dict[str, List[float]] = {k: [] for k in ELECTRONIC_KEYS}
         all_pred: Dict[str, List[float]] = {k: [] for k in ELECTRONIC_KEYS}
 
@@ -375,16 +373,16 @@ class Trainer:
             self.optimizer.step()
 
             total_loss += float(loss.item())
-            all_ovp_true.extend(out["true_ovp"].tolist())
-            all_ovp_pred.extend(out["pred_ovp"].tolist())
+            all_ads_true.extend(out["true_ads"].tolist())
+            all_ads_pred.extend(out["pred_ads"].tolist())
             for k in ELECTRONIC_KEYS:
                 if f"true_{k}" in out:
                     all_true[k].extend(out[f"true_{k}"].tolist())
                     all_pred[k].extend(out[f"pred_{k}"].tolist())
 
         avg_loss = total_loss / max(1, len(self.train_loader))
-        ovp_mae = float(mean_absolute_error(all_ovp_true, all_ovp_pred))
-        ovp_metrics = compute_metrics_regression(all_ovp_true, all_ovp_pred)
+        ads_mae = float(mean_absolute_error(all_ads_true, all_ads_pred))
+        ads_metrics = compute_metrics_regression(all_ads_true, all_ads_pred)
 
         per_key = {k: compute_metrics_regression(all_true[k], all_pred[k]) for k in ELECTRONIC_KEYS if len(all_true[k]) > 0}
         avg_e_mse = float(np.mean([per_key[k]["mse"] for k in per_key])) if per_key else float("nan")
@@ -392,9 +390,9 @@ class Trainer:
 
         out_metrics = {
             "loss": avg_loss,
-            "ovp_mae": ovp_mae,
-            "ovp_mse": ovp_metrics["mse"],
-            "ovp_r2": ovp_metrics["r2"],
+            "ads_mae": ads_mae,
+            "ads_mse": ads_metrics["mse"],
+            "ads_r2": ads_metrics["r2"],
             "e_avg_mse": avg_e_mse,
             "e_avg_r2": avg_e_r2,
         }
@@ -444,7 +442,7 @@ class Trainer:
                 metrics[f"e_{k}_r2"] = per_key[k]["r2"]
             return metrics, pred_true, sample_ids
 
-        pred_true["overpotential"] = {"pred": [], "true": []}
+        pred_true["adsorption_energy"] = {"pred": [], "true": []}
         for k in ELECTRONIC_KEYS:
             pred_true[k] = {"pred": [], "true": []}
 
@@ -460,11 +458,11 @@ class Trainer:
                 else:
                     sample_ids.append(str(bid))
             else:
-                n_graphs = int(out["pred_ovp"].shape[0])
+                n_graphs = int(out["pred_ads"].shape[0])
                 sample_ids.extend([f"sample_{len(sample_ids)+i}" for i in range(n_graphs)])
 
-            pred_true["overpotential"]["pred"].extend(out["pred_ovp"].tolist())
-            pred_true["overpotential"]["true"].extend(out["true_ovp"].tolist())
+            pred_true["adsorption_energy"]["pred"].extend(out["pred_ads"].tolist())
+            pred_true["adsorption_energy"]["true"].extend(out["true_ads"].tolist())
 
             for k in ELECTRONIC_KEYS:
                 if f"true_{k}" in out:
@@ -472,8 +470,8 @@ class Trainer:
                     pred_true[k]["true"].extend(out[f"true_{k}"].tolist())
 
         avg_loss = total_loss / max(1, len(loader))
-        ovp_mae = float(mean_absolute_error(pred_true["overpotential"]["true"], pred_true["overpotential"]["pred"]))
-        ovp_metrics = compute_metrics_regression(pred_true["overpotential"]["true"], pred_true["overpotential"]["pred"])
+        ads_mae = float(mean_absolute_error(pred_true["adsorption_energy"]["true"], pred_true["adsorption_energy"]["pred"]))
+        ads_metrics = compute_metrics_regression(pred_true["adsorption_energy"]["true"], pred_true["adsorption_energy"]["pred"])
 
         per_key = {k: compute_metrics_regression(pred_true[k]["true"], pred_true[k]["pred"]) for k in ELECTRONIC_KEYS}
         avg_e_mse = float(np.mean([per_key[k]["mse"] for k in ELECTRONIC_KEYS]))
@@ -481,9 +479,9 @@ class Trainer:
 
         metrics = {
             "loss": avg_loss,
-            "ovp_mae": ovp_mae,
-            "ovp_mse": ovp_metrics["mse"],
-            "ovp_r2": ovp_metrics["r2"],
+            "ads_mae": ads_mae,
+            "ads_mse": ads_metrics["mse"],
+            "ads_r2": ads_metrics["r2"],
             "e_avg_mse": avg_e_mse,
             "e_avg_r2": avg_e_r2,
         }
@@ -596,9 +594,9 @@ class Trainer:
             plt.close()
         else:
             fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-            ax[0].plot(self.history["train_ovp_mae"], label="train")
-            ax[0].plot(self.history["val_ovp_mae"], label="val")
-            ax[0].set_title("Overpotential MAE")
+            ax[0].plot(self.history["train_ads_mae"], label="train")
+            ax[0].plot(self.history["val_ads_mae"], label="val")
+            ax[0].set_title("Adsorption-energy MAE")
             ax[0].set_xlabel("Epoch")
             ax[0].set_ylabel("MAE")
             ax[0].legend(); ax[0].grid(True, alpha=0.3)
@@ -611,12 +609,12 @@ class Trainer:
             ax[1].legend(); ax[1].grid(True, alpha=0.3)
 
             plt.tight_layout()
-            out = self.save_dir / "training_overpotential_metrics.png"
+            out = self.save_dir / "training_adsorption_energy_metrics.png"
             plt.savefig(out, dpi=300)
             plt.close()
 
     def plot_predictions(self, pred_true: Dict[str, Dict[str, List[float]]], metrics: Dict[str, float], sample_ids: Optional[List[str]] = None) -> None:
-        keys_to_plot = ["overpotential"] if (self.task == "joint") else []
+        keys_to_plot = ["adsorption_energy"] if (self.task == "joint") else []
         keys_to_plot += ELECTRONIC_KEYS
 
         n = len(keys_to_plot)
@@ -639,7 +637,7 @@ class Trainer:
 
             m = compute_metrics_regression(y_true, y_pred)
             title = f"{k}\nMSE={m['mse']:.4g}, R²={m['r2']:.4g}"
-            if k == "overpotential":
+            if k == "adsorption_energy":
                 title += f", MAE={float(mean_absolute_error(y_true, y_pred)):.4g}"
 
             ax.set_title(title)
@@ -685,8 +683,8 @@ class Trainer:
                 self.history["train_e_avg_r2"].append(float(train_metrics["e_avg_r2"]))
                 self.history["val_e_avg_r2"].append(float(val_metrics["e_avg_r2"]))
             else:
-                self.history["train_ovp_mae"].append(float(train_metrics["ovp_mae"]))
-                self.history["val_ovp_mae"].append(float(val_metrics["ovp_mae"]))
+                self.history["train_ads_mae"].append(float(train_metrics["ads_mae"]))
+                self.history["val_ads_mae"].append(float(val_metrics["ads_mae"]))
 
             print(f"\nEpoch {epoch + 1}/{n_epochs}")
             if self.task == "electronic":
@@ -695,8 +693,8 @@ class Trainer:
                 for k in ELECTRONIC_KEYS:
                     print(f"    {k}: MSE={val_metrics[f'e_{k}_mse']:.4g}, R²={val_metrics[f'e_{k}_r2']:.4g}")
             else:
-                print(f"  Train Loss: {train_metrics['loss']:.4f} | ovp_mae: {train_metrics['ovp_mae']:.4g} | ovp_r2: {train_metrics['ovp_r2']:.4g}")
-                print(f"  Val   Loss: {val_metrics['loss']:.4f} | ovp_mae: {val_metrics['ovp_mae']:.4g} | ovp_r2: {val_metrics['ovp_r2']:.4g}")
+                print(f"  Train Loss: {train_metrics['loss']:.4f} | ads_mae: {train_metrics['ads_mae']:.4g} | ads_r2: {train_metrics['ads_r2']:.4g}")
+                print(f"  Val   Loss: {val_metrics['loss']:.4f} | ads_mae: {val_metrics['ads_mae']:.4g} | ads_r2: {val_metrics['ads_r2']:.4g}")
                 print(f"  Val Electronic: e_avg_mse={val_metrics['e_avg_mse']:.4g}, e_avg_r2={val_metrics['e_avg_r2']:.4g}")
 
             if val_metrics["loss"] < self.best_val_loss:
@@ -729,10 +727,10 @@ class Trainer:
                 print(f"  MSE = {test_metrics[f'e_{k}_mse']:.6f}")
                 print(f"  R²  = {test_metrics[f'e_{k}_r2']:.6f}")
         else:
-            print("Overpotential Prediction:")
-            print(f"  MAE = {test_metrics['ovp_mae']:.6f}")
-            print(f"  MSE = {test_metrics['ovp_mse']:.6f}")
-            print(f"  R²  = {test_metrics['ovp_r2']:.6f}")
+            print("Adsorption-energy prediction:")
+            print(f"  MAE = {test_metrics['ads_mae']:.6f}")
+            print(f"  MSE = {test_metrics['ads_mse']:.6f}")
+            print(f"  R²  = {test_metrics['ads_r2']:.6f}")
             print("\nElectronic Properties:")
             print(f"  Electronic Avg MSE = {test_metrics['e_avg_mse']:.6f}")
             print(f"  Electronic Avg R²  = {test_metrics['e_avg_r2']:.6f}")
@@ -742,7 +740,7 @@ class Trainer:
                 print(f"  R²  = {test_metrics[f'e_{k}_r2']:.6f}")
         print("=" * 60)
 
-        keys_to_export = ELECTRONIC_KEYS if (self.task == "electronic") else (["overpotential"] + ELECTRONIC_KEYS)
+        keys_to_export = ELECTRONIC_KEYS if (self.task == "electronic") else (["adsorption_energy"] + ELECTRONIC_KEYS)
         self.export_predictions_and_outliers(pred_true=pred_true, sample_ids=sample_ids, keys_to_export=keys_to_export, top_n=30)
 
         with open(self.save_dir / "history.json", "w", encoding="utf-8") as f:
@@ -759,8 +757,8 @@ class Trainer:
                 results[k] = {"mse": float(test_metrics[f"e_{k}_mse"]), "r2": float(test_metrics[f"e_{k}_r2"])}
             results["electronic_avg"] = {"mse": float(test_metrics["e_avg_mse"]), "r2": float(test_metrics["e_avg_r2"])}
         else:
-            results["overpotential"] = {
-                "mae": float(test_metrics["ovp_mae"]), "mse": float(test_metrics["ovp_mse"]), "r2": float(test_metrics["ovp_r2"])
+            results["adsorption_energy"] = {
+                "mae": float(test_metrics["ads_mae"]), "mse": float(test_metrics["ads_mse"]), "r2": float(test_metrics["ads_r2"])
             }
             for k in ELECTRONIC_KEYS:
                 results[k] = {"mse": float(test_metrics[f"e_{k}_mse"]), "r2": float(test_metrics[f"e_{k}_r2"])}
@@ -779,10 +777,10 @@ def parse_args() -> argparse.Namespace:
         help="Path to the dataset directory containing CSV and CIF files",
     )
     parser.add_argument("--task", choices=["electronic", "joint"], default="joint")
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--patience", type=int, default=20)
+    parser.add_argument("--patience", type=int, default=30)
     parser.add_argument("--save-dir", type=str, default="./checkpoints")
     parser.add_argument(
         "--reprocess",
@@ -805,7 +803,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-neighbors", type=int, default=12)
     parser.add_argument("--rbf-bins", type=int, default=64)
     parser.add_argument("--no-rbf", action="store_true")
-    parser.add_argument("--use-cn", action="store_true")
+    parser.add_argument("--use-cn", dest="use_cn", action="store_true", default=True)
+    parser.add_argument("--no-cn", dest="use_cn", action="store_false")
     parser.add_argument("--use-surface", action="store_true")
     parser.add_argument("--use-znorm", action="store_true")
     parser.add_argument("--use-triplet-angle", action="store_true")
@@ -813,7 +812,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--angle-gamma", type=float, default=10.0)
     parser.add_argument("--max-triplets-per-center", type=int, default=64)
     parser.add_argument("--lambda-electronic", type=float, default=0.3)
-    parser.add_argument("--lambda-overpotential", type=float, default=1.0)
+    parser.add_argument("--lambda-adsorption-energy", dest="lambda_adsorption_energy", type=float, default=1.0)
     parser.add_argument("--lambda-constraint", type=float, default=0.1)
     parser.add_argument("--init-electronic-ckpt", type=str, default=None)
     parser.add_argument("--freeze-electronic-epochs", type=int, default=0)
@@ -905,14 +904,14 @@ def main() -> None:
             return all_idxs
 
         original_count = len(all_idxs)
-        kept, removed_empty_overpotential, stale_cache, invalid_y = [], [], [], []
+        kept, removed_empty_adsorption_energy, stale_cache, invalid_y = [], [], [], []
 
         def _names(idxs: List[int]) -> List[str]:
             return [os.path.basename(cif_files[int(i)]) for i in idxs]
 
         for idx in map(int, all_idxs):
-            if not has_valid_overpotential_label(idx, cif_files, properties_dict):
-                removed_empty_overpotential.append(idx)
+            if not has_valid_adsorption_energy_label(idx, cif_files, properties_dict):
+                removed_empty_adsorption_energy.append(idx)
                 continue
 
             try:
@@ -940,10 +939,10 @@ def main() -> None:
             "strategy": "Pre-filter before splitting",
             "original_count": original_count,
             "kept_count": len(kept),
-            "removed_empty_overpotential_count": len(removed_empty_overpotential),
+            "removed_empty_adsorption_energy_count": len(removed_empty_adsorption_energy),
             "stale_cache_missing_y_count": len(stale_cache),
             "invalid_y_count": len(invalid_y),
-            "removed_empty_overpotential_files": _names(removed_empty_overpotential),
+            "removed_empty_adsorption_energy_files": _names(removed_empty_adsorption_energy),
             "stale_cache_missing_y_files": _names(stale_cache),
             "invalid_y_files": _names(invalid_y),
         }
@@ -951,7 +950,7 @@ def main() -> None:
         print("=" * 60)
         print("Data pre-filtering: keeping only samples with valid supervised targets")
         print(f"  Original samples: {original_count} -> valid samples: {len(kept)}")
-        print(f"  (Excluded: missing targets {len(removed_empty_overpotential)}; stale caches {len(stale_cache)}; invalid values {len(invalid_y)} samples)")
+        print(f"  (Excluded: missing targets {len(removed_empty_adsorption_energy)}; stale caches {len(stale_cache)}; invalid values {len(invalid_y)} samples)")
         print("=" * 60)
 
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -971,7 +970,7 @@ def main() -> None:
         if not args.no_label_norm:
             keys_for_norm = ELECTRONIC_KEYS.copy()
             if args.task == "joint":
-                keys_for_norm = ["overpotential"] + keys_for_norm
+                keys_for_norm = ["adsorption_energy"] + keys_for_norm
             norm_stats = compute_norm_stats(cif_files, properties_dict, train_idx, keys_for_norm)
             _maybe_reuse_electronic_stats(norm_stats)
             with open(save_dir / "label_stats.json", "w", encoding="utf-8") as f:
@@ -996,7 +995,7 @@ def main() -> None:
         trainer = Trainer(
             model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader,
             task=args.task, device=device, learning_rate=args.lr, save_dir=str(save_dir),
-            lambda_electronic=args.lambda_electronic, lambda_overpotential=args.lambda_overpotential,
+            lambda_electronic=args.lambda_electronic, lambda_adsorption_energy=args.lambda_adsorption_energy,
             lambda_constraint=args.lambda_constraint, freeze_electronic_epochs=args.freeze_electronic_epochs,
             norm_stats=norm_stats,
         )
@@ -1076,8 +1075,8 @@ def main() -> None:
             print(f"  {k}: MSE={results[k]['mse']:.4g}, R²={results[k]['r2']:.4g}")
         print(f"  avg: MSE={results['electronic_avg']['mse']:.4g}, R²={results['electronic_avg']['r2']:.4g}")
     else:
-        a = results["overpotential"]
-        print(f"overpotential: MAE={a['mae']:.4g}, MSE={a['mse']:.4g}, R²={a['r2']:.4g}")
+        a = results["adsorption_energy"]
+        print(f"adsorption_energy: MAE={a['mae']:.4g}, MSE={a['mse']:.4g}, R²={a['r2']:.4g}")
         print(f"Electronic avg: MSE={results['electronic_avg']['mse']:.4g}, R²={results['electronic_avg']['r2']:.4g}")
 
 if __name__ == "__main__":

@@ -16,11 +16,11 @@ if 'ElectronicStructurePredictor' not in globals():
             super().__init__()
             raise RuntimeError('ElectronicStructurePredictor is missing from this file. Please restore its definition.')
 
-if 'OverpotentialPredictor' not in globals():
-    class OverpotentialPredictor(nn.Module):
+if 'AdsorptionEnergyPredictor' not in globals():
+    class AdsorptionEnergyPredictor(nn.Module):
         def __init__(self, *args, **kwargs):
             super().__init__()
-            raise RuntimeError('OverpotentialPredictor is missing from this file. Please restore its definition.')
+            raise RuntimeError('AdsorptionEnergyPredictor is missing from this file. Please restore its definition.')
 
 
 class CGConv(MessagePassing):
@@ -335,7 +335,7 @@ class ElectronicStructurePredictor(nn.Module):
         return electronic_features, electronic_repr
 
 
-class OverpotentialPredictor(nn.Module):
+class AdsorptionEnergyPredictor(nn.Module):
 
 
     def __init__(
@@ -349,7 +349,7 @@ class OverpotentialPredictor(nn.Module):
         use_triplet_angle: bool = False,
         angle_dim: int = 32,
     ):
-        super(OverpotentialPredictor, self).__init__()
+        super(AdsorptionEnergyPredictor, self).__init__()
 
         self.node_embedding = nn.Linear(atom_fea_len, node_dim)
         self.edge_embedding = nn.Linear(edge_fea_len, edge_dim)
@@ -436,9 +436,9 @@ class OverpotentialPredictor(nn.Module):
 
 
         combined = torch.cat([structural_features, electronic_processed], dim=-1)
-        overpotential_pred = self.predictor(combined)
+        adsorption_energy_pred = self.predictor(combined)
 
-        return overpotential_pred
+        return adsorption_energy_pred
 
 
 class HierarchicalCGCNN(nn.Module):
@@ -467,7 +467,7 @@ class HierarchicalCGCNN(nn.Module):
             angle_dim=angle_dim,
         )
 
-        self.overpotential_predictor = OverpotentialPredictor(
+        self.adsorption_energy_predictor = AdsorptionEnergyPredictor(
             node_dim=node_dim,
             edge_dim=edge_dim,
             electronic_dim=electronic_dim,
@@ -483,13 +483,13 @@ class HierarchicalCGCNN(nn.Module):
         electronic_features, electronic_repr = self.electronic_predictor(data)
 
 
-        overpotential = self.overpotential_predictor(
+        adsorption_energy = self.adsorption_energy_predictor(
             data, electronic_features, electronic_repr
         )
 
         if return_electronic:
-            return overpotential, electronic_features
-        return overpotential
+            return adsorption_energy, electronic_features
+        return adsorption_energy
 
 
 class HierarchicalLoss(nn.Module):
@@ -498,13 +498,13 @@ class HierarchicalLoss(nn.Module):
     def __init__(
         self,
         lambda_electronic: float = 0.3,
-        lambda_overpotential: float = 1.0,
+        lambda_adsorption_energy: float = 1.0,
         lambda_constraint: float = 0.1,
         norm_stats: dict | None = None,
     ):
         super(HierarchicalLoss, self).__init__()
         self.lambda_electronic = lambda_electronic
-        self.lambda_overpotential = lambda_overpotential
+        self.lambda_adsorption_energy = lambda_adsorption_energy
         self.lambda_constraint = lambda_constraint
 
 
@@ -532,21 +532,21 @@ class HierarchicalLoss(nn.Module):
 
 
         if (
-            self.lambda_overpotential > 0
+            self.lambda_adsorption_energy > 0
             and isinstance(predictions, dict)
             and isinstance(targets, dict)
-            and 'overpotential' in predictions
-            and 'overpotential' in targets
-            and targets['overpotential'] is not None
+            and 'adsorption_energy' in predictions
+            and 'adsorption_energy' in targets
+            and targets['adsorption_energy'] is not None
         ):
-            pred_ovp = predictions['overpotential'].view(-1)
-            tgt_ovp = targets['overpotential'].view(-1)
+            pred_ads = predictions['adsorption_energy'].view(-1)
+            tgt_ads = targets['adsorption_energy'].view(-1)
 
-            pred_ovp_n = self._maybe_norm('overpotential', pred_ovp)
-            tgt_ovp_n = self._maybe_norm('overpotential', tgt_ovp)
-            ovp_loss = F.mse_loss(pred_ovp_n, tgt_ovp_n)
-            loss += self.lambda_overpotential * ovp_loss
-            loss_dict['overpotential'] = ovp_loss.item()
+            pred_ads_n = self._maybe_norm('adsorption_energy', pred_ads)
+            tgt_ads_n = self._maybe_norm('adsorption_energy', tgt_ads)
+            ads_loss = F.mse_loss(pred_ads_n, tgt_ads_n)
+            loss += self.lambda_adsorption_energy * ads_loss
+            loss_dict['adsorption_energy'] = ads_loss.item()
 
 
         electronic_loss = 0.0
@@ -634,10 +634,10 @@ if __name__ == "__main__":
 
     print("\nRunning a forward pass...")
     with torch.no_grad():
-        overpotential, electronic_features = model(data, return_electronic=True)
+        adsorption_energy, electronic_features = model(data, return_electronic=True)
 
     print(f"\nPrediction results:")
-    print(f"  Overpotential: {overpotential.item():.4f} eV")
+    print(f"  Adsorption energy: {adsorption_energy.item():.4f} eV")
     print(f"\nElectronic-structure features:")
     print(f"  Work function: {electronic_features['work_function'].item():.4f} eV")
     print(f"  d-band center: {electronic_features['d_band_center'].item():.4f} eV")

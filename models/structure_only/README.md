@@ -1,33 +1,45 @@
-# Direct CGCNN for Adsorption Energy Prediction in 2D MOFs
+# Structure-Only CGCNN for *OOH Adsorption-Energy Prediction
 
-This folder is a **structure-only** model for adsorption-energy regression, not the full two-stage electronic-property/adsorption-energy model.
+This directory contains the structure-only CGCNN baseline for predicting DFT-calculated *OOH adsorption energy (eV) in two-dimensional metal–organic frameworks.
 
-## Data
+## Dataset
 
-Place `data.csv`, `atom_init.json`, `zval_map.json`, `ionization_energy_map.json`, and `cif_files/` under a single data directory (e.g. `training_dataset/1/`).
+Use the repository-level `data/` directory containing `data.csv`, `atom_init.json`, `cif_files/`, `zval_map.json`, and `ionization_energy_map.json`. The recommended dataset columns are `cif_filename` and `adsorption_energy`. The supervised regression target is *OOH adsorption energy in eV.
 
-The CSV requires a CIF filename column (`cif_filename`, `cif_file`, or a column whose name contains `cif` or `file`) and one of the labels: `adsorption_energy`, `adsorption_free_energy`, `ΔG*OOH`, `ΔG_OOH`, `delta_g_ooh`. The model learns the numeric labels **as-is**; it does not convert adsorption energies into overpotentials. Ensure the selected label represents the quantity described in your paper (e.g. ΔG*OOH if using adsorption free energies).
+## Run from the repository root
 
-## Train
-
-```
-python train.py training_dataset/1 --epochs 200 --patience 30 --reprocess --save-dir checkpoints/direct_adsorption
-```
-
-Default: 70/15/15 random split, seed 42, batch size 16, cutoff 8 Å, max neighbors 12, coordination features enabled, ZVAL/ionization features enabled, triplet-angle disabled, early-stopping patience 30.
-
-To reproduce the same train/test partition from another model, supply both CSV files:
-
-```
-python train.py training_dataset/1 --epochs 200 --reprocess --train-csv PATH_TO_TRAIN_PREDICTIONS.csv --test-csv PATH_TO_TEST_PREDICTIONS.csv --save-dir checkpoints/direct_adsorption_fixed
+```bash
+python models/structure_only/train.py data \
+  --epochs 300 --patience 30 --seed 42 --reprocess \
+  --save-dir checkpoints/structure_only
 ```
 
-In the fixed-split mode, sample names listed in those two CSV files determine train and test sets; the remaining valid samples form the validation set. Their counts are data-dependent. The program writes `split_assignments.csv` to the selected output folder.
+To use train/test membership exported by the structure-plus-electronic-properties pipeline:
 
-The supplied `hierarchical_cgcnn_triplet_angle.py` retains **legacy hierarchical overpotential/SISSO classes** from the input model source, but `train.py` imports and trains only `DirectAdsorptionEnergyPredictor`. Do not use the legacy hierarchical components to claim adsorption-energy reproduction without separately validating/adapting them.
+```bash
+python models/structure_only/train.py data \
+  --epochs 300 --patience 30 --seed 42 --reprocess \
+  --train-csv checkpoints/structure_electronic/train_predictions.csv \
+  --test-csv checkpoints/structure_electronic/test_predictions.csv \
+  --save-dir checkpoints/structure_only_fixed_split
+```
 
-The scripts were statically checked for Python syntax and import/class-name consistency. A real 270-CIF training run has not been performed here; PyTorch Geometric/pymatgen are required. Use `--reprocess` when changing labels or graph featurization to discard stale `processed/data_*.pt` cache items.
+The sample IDs provided by the two CSV files determine the training and test sets. Remaining eligible samples form the validation set. Review `split_assignments.csv` before comparing results across models.
 
-## Localization
+## Default settings
 
-The Python scripts use English status messages and error text. Compatibility with legacy Chinese CSV header aliases is retained internally; the recommended CSV headers are `cif_filename` and `adsorption_energy`. English-language changes do not affect model parameters, sample selection, or training computations.
+- Maximum epochs: `300`
+- Early-stopping patience: `30`
+- Batch size: `16`
+- Learning rate: `1e-3`
+- Random seed: `42`
+- Cutoff radius: `8` Å
+- Maximum neighbors: `12`
+- Intended training/validation/test split: `70/15/15`
+- Structural and atomic node features include coordination number, ZVAL, and ionization energy
+
+The structure-only model does not use the DFT-calculated work function or d-band center as supervised electronic-property prediction targets.
+
+## Outputs and cache
+
+The selected output directory contains `split_assignments.csv`, `best_direct_model.pt`, training/test prediction tables, and plotting data. Use `--reprocess` after changing graph features, labels, or data order to rebuild cached graphs in `data/processed/`.

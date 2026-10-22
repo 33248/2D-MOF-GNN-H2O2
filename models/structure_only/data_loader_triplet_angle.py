@@ -369,8 +369,6 @@ class MOFDataPreprocessor:
                 data.work_function = torch.tensor([float(properties['work_function'])], dtype=torch.float)
             if 'd_band_center' in properties and properties['d_band_center'] is not None:
                 data.d_band_center = torch.tensor([float(properties['d_band_center'])], dtype=torch.float)
-            if 'overpotential' in properties and properties['overpotential'] is not None:
-                data.overpotential = torch.tensor([float(properties['overpotential'])], dtype=torch.float)
         return data
 
     def _distance_to_rbf(self, distances: torch.Tensor) -> torch.Tensor:
@@ -737,7 +735,7 @@ def create_synthetic_dataset(n_samples: int = 100,
 
 
         properties_dict[f"mof_{i}.cif"] = {
-            'overpotential': np.random.uniform(-3.0, 0.0),
+            'adsorption_energy': np.random.uniform(-3.0, 0.0),
             'fermi_level': np.random.uniform(-6.0, -4.0),
             'work_function': np.random.uniform(4.0, 6.0),
             'd_band_center': np.random.uniform(-3.0, -1.0)

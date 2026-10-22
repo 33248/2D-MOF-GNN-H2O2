@@ -1,0 +1,12 @@
+# Versions recorded from the hcgcnn environment exported in October 2026.
+# This is a curated list for the three model training scripts, not a full environment lock.
+# Install the appropriate PyTorch CPU/CUDA build BEFORE installing this file.
+# The CUDA stack and PyTorch Geometric compatibility must be tested on each platform.
+torch==2.9.0
+torch-geometric==2.5.2
+numpy==2.2.6
+pandas==2.3.3
+scipy==1.15.3
+scikit-learn==1.7.2
+matplotlib==3.10.7
+pymatgen==2025.10.7

@@ -71,8 +71,10 @@ def read_dataset_flexible(data_path):
 
         cif_files.append(dataset_cif_path)
 
-        props = {col: row[col] for col in df.columns}
-        props['adsorption_energy'] = pd.to_numeric(row[energy_col], errors='coerce')
+        props = {'adsorption_energy': pd.to_numeric(row[energy_col], errors='coerce')}
+        for auxiliary_key in ('fermi_level', 'work_function', 'd_band_center'):
+            if auxiliary_key in df.columns:
+                props[auxiliary_key] = row[auxiliary_key]
 
 
         properties_dict[dataset_cif_path] = props

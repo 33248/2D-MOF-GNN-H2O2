@@ -1,48 +1,53 @@
-# Ligand Generalization (Leave-Ligands-Out) Experiment
+# Ligand Generalization (Leave-Ligands-Out) — Adsorption-Energy Prediction
 
-This directory contains the hierarchical CGCNN implementation for assessing out-of-distribution (OOD) generalization to ligand groups absent from training. The source code is an English, comment-free transcription of the supplied ligand-holdout implementation. The underlying neural network, data processing, training strategy, and numerical defaults are unchanged.
+This directory contains the hierarchical crystal graph convolutional neural network (CGCNN) implementation for out-of-distribution ligand-holdout evaluation of *OOH adsorption-energy regression.
 
-## Included files
+The model predicts the numeric adsorption-energy target supplied by the dataset. It does not derive other catalytic activity metrics from the input labels; those must be calculated separately using the convention in the associated study.
 
-- `data_loader_triplet_angle.py`: crystal graph and feature construction from CIF files.
-- `hierarchical_cgcnn_triplet_angle.py`: hierarchical CGCNN network definition and loss functions.
-- `train.py`: pre-filtering, ligand-group holdout split, training, evaluation, and checkpoints.
+## Files
+
+- `train.py`: dataset reading, filtering, ligand-group holdout, training, testing, and prediction export.
+- `data_loader_triplet_angle.py`: conversion of CIF structures into crystal graphs.
+- `hierarchical_cgcnn_triplet_angle.py`: hierarchical model, electronic-property heads, adsorption-energy predictor, and loss functions.
 
 ## Dataset
 
-Provide a dataset directory containing `data.csv` (or `training_data.csv`), `atom_init.json`, and a `cif_files/` folder. The model also supports optional `zval_map.json` and `ionization_energy_map.json` when the corresponding features are enabled.
+Use the repository-level `data/` folder containing `data.csv`, `atom_init.json`, and `cif_files/` with its CIF structures. Optional element-property files are `zval_map.json` and `ionization_energy_map.json`.
 
-The CSV must identify each CIF file using a supported CIF filename column. In `joint` mode, `adsorption_energy` is preferred when available, while legacy target aliases remain supported. **The code retains `overpotential` as an internal target key for backward compatibility, even when the CSV supplies `adsorption_energy`; no conversion between adsorption energy and overpotential is performed.**
+The supervised target column is `adsorption_energy` (eV). The input CSV reader also accepts the equivalent Chinese header `吸附能`. The target is the DFT-calculated *OOH adsorption energy used in this study. Internal training variables, plots, model outputs, and exported metric names use `adsorption_energy`.
 
-## Run
-
-From the directory containing the three Python files:
+## Run (from the repository root)
 
 ```bash
-python train.py ../../data --task joint --epochs 100 --seed 42 --reprocess --save-dir ligand_ood_results
+python models/ligand_generalization/train.py data \
+  --task joint --epochs 300 --patience 30 --seed 42 --reprocess \
+  --save-dir checkpoints/ligand_generalization
 ```
 
-To hold out specific ligand names:
+To choose held-out ligand groups explicitly:
 
 ```bash
-python train.py ../../data --task joint --test-ligands THQ BHT --reprocess --save-dir ligand_ood_results
+python models/ligand_generalization/train.py data \
+  --task joint --test-ligands LIGAND_A LIGAND_B LIGAND_C \
+  --epochs 300 --patience 30 --seed 42 --reprocess \
+  --save-dir checkpoints/ligand_generalization_custom
 ```
 
-Use only ligand labels actually detected from your CIF naming convention. The script derives each ligand label from the filename segments following the first hyphen. Confirm that this naming rule matches the dataset before interpreting the split as ligand generalization.
+Replace ligand placeholders with exactly the groups recognized from your CIF filenames. This script takes the filename portion after the first `-` as the ligand group label; confirm that this matches the naming in your dataset.
 
-## Split details
+## Data splitting
 
-The script first removes samples without valid supervised targets. It then holds out three randomly selected ligand groups (or groups specified with `--test-ligands`) for OOD testing. The remaining ligand groups are divided into training and validation sets, with **15% of the remaining samples assigned to validation**. Thus, the final global proportions are **not guaranteed to be 70:15:15**.
+The program filters out invalid target labels before splitting. With no explicit `--test-ligands`, it selects three ligand groups for OOD testing using the supplied seed. It then reserves 15% of the remaining samples for validation and uses the rest for training. Consequently, the overall dataset does **not** have a fixed 70:15:15 division.
 
-## Original defaults
+## Default settings
 
-- Seed: `42`
-- Early-stopping patience: `20` epochs
-- Maximum epochs: `100`
-- Batch size: `32`
+- Random seed: `42`
+- Maximum epochs: `300`
+- Early-stopping patience: `30`
+- Batch size: `16`
 - Learning rate: `1e-3`
-- Graph cutoff: `8.0` Å
+- Cutoff: `8` Å
 - Maximum neighbors: `12`
-- Coordination number (`--use-cn`): disabled unless explicitly passed in this uploaded variant
-
-The code's internal identifiers are intentionally preserved to avoid changing behavior. These source files have been syntax-checked, but training on the original CIF dataset and end-to-end numerical reproducibility have not been verified here.
+- Coordination-number (CN) feature: enabled by default (`--no-cn` disables it)
+- Electronic targets: `work_function` and `d_band_center`
+- Adsorption-target loss weight option: `--lambda-adsorption-energy`
